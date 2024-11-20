@@ -1,4 +1,5 @@
 import os
+import shutil
 import tkinter as tk
 from tkinter import messagebox, filedialog
 from tkinter import ttk
@@ -6,16 +7,19 @@ import subprocess
 import json
 import speech_recognition as sr
 import pyttsx3
-from datetime import datetime
 import logging
+from datetime import datetime
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 # Initialize TTS engine
 tts_engine = pyttsx3.init()
 tts_engine.setProperty("rate", 150)
 
 # Set up logging
-logging.basicConfig(filename="download_log.txt", level=logging.DEBUG, 
+log_dir = "logs"
+os.makedirs(log_dir, exist_ok=True)
+logging.basicConfig(filename=os.path.join(log_dir, "application.log"), level=logging.DEBUG, 
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Global constants
@@ -39,8 +43,7 @@ def check_dependencies():
         error_msg = f"The following dependencies are missing: {', '.join(missing)}\nPlease ensure they are in the same directory as this program."
         logging.error(error_msg)
         messagebox.showerror("Missing Dependencies", error_msg)
-        tts_engine.say(error_msg)
-        tts_engine.runAndWait()
+        speak(error_msg)
         sys.exit(1)
 
 # Load or initialize user preferences
@@ -48,7 +51,7 @@ def load_memory():
     if os.path.exists(MEMORY_FILE):
         with open(MEMORY_FILE, "r") as f:
             return json.load(f)
-    return {"output_folder": "", "thumbnail": True, "metadata": True, "audio_quality": "128", "video_resolution": "best"}
+    return {"output_folder": "", "video_resolution": "best", "audio_quality": "128", "subtitles": False}
 
 def save_memory(memory):
     with open(MEMORY_FILE, "w") as f:
@@ -118,7 +121,8 @@ def download_video(url):
         speak("Please select an output folder.")
         return
 
-    command = f'"{YTDLP_PATH}" -f "bestvideo[height<={resolution}]+bestaudio/best[height<={resolution}]" --merge-output-format mp4 -o "{output_dir}/%(title)s.%(ext)s" {url}'
+    subtitles = '--write-sub' if memory["subtitles"] else ''
+    command = f'"{YTDLP_PATH}" {subtitles} -f "bestvideo[height<={resolution}]+bestaudio/best[height<={resolution}]" --merge-output-format mp4 -o "{output_dir}/%(title)s.%(ext)s" {url}'
     run_command(command)
     add_to_history(url)
 
@@ -142,7 +146,8 @@ def download_audio(url):
         speak("Please select an output folder.")
         return
 
-    command = f'"{YTDLP_PATH}" -x --audio-format mp3 --audio-quality {bitrate} --embed-metadata --embed-thumbnail -o "{output_dir}/%(title)s.%(ext)s" {url}'
+    subtitles = '--write-sub' if memory["subtitles"] else ''
+    command = f'"{YTDLP_PATH}" {subtitles} -x --audio-format mp3 --audio-quality {bitrate} --embed-metadata --embed-thumbnail -o "{output_dir}/%(title)s.%(ext)s" {url}'
     run_command(command)
     add_to_history(url)
 
@@ -154,35 +159,58 @@ def select_output_folder():
         save_memory(memory)
         speak("Output folder updated.")
 
+# Select or toggle subtitles
+def toggle_subtitles():
+    memory["subtitles"] = not memory["subtitles"]
+    save_memory(memory)
+    status = "enabled" if memory["subtitles"] else "disabled"
+    speak(f"Subtitles {status}.")
+
+# Multi-download support
+def download_multiple_videos(urls):
+    with ThreadPoolExecutor() as executor:
+        executor.map(run_command, urls)
+
 # Create main GUI
 root = tk.Tk()
 root.title("MTX YT Downloader")
-root.geometry("700x600")
-root.config(bg="#0A0A0A")
+root.geometry("800x600")
+root.config(bg="#1A1A1A")
+
+# Exit confirmation
+def on_exit():
+    if messagebox.askyesno("Exit", "Are you sure you want to exit?"):
+        root.destroy()
+
+root.protocol("WM_DELETE_WINDOW", on_exit)
 
 # Title Label
-title_label = tk.Label(root, text="MTX YT Downloader", font=("Helvetica", 16, "bold"), fg="#00FFFF", bg="#0A0A0A")
+title_label = tk.Label(root, text="MTX YT Downloader", font=("Helvetica", 18, "bold"), fg="#00FFFF", bg="#1A1A1A")
 title_label.pack(pady=20)
 
 # URL Entry Section
-url_label = tk.Label(root, text="Enter YouTube URL:", font=("Helvetica", 12), fg="#FFFFFF", bg="#0A0A0A")
+url_label = tk.Label(root, text="Enter YouTube URL:", font=("Helvetica", 12), fg="#FFFFFF", bg="#1A1A1A")
 url_label.pack(pady=5)
 url_entry = tk.Entry(root, width=50, font=("Helvetica", 12))
 url_entry.pack(pady=10)
 
 # Video Resolution Dropdown
-video_res_label = tk.Label(root, text="Select Video Resolution:", font=("Helvetica", 12), fg="#FFFFFF", bg="#0A0A0A")
+video_res_label = tk.Label(root, text="Select Video Resolution:", font=("Helvetica", 12), fg="#FFFFFF", bg="#1A1A1A")
 video_res_label.pack(pady=5)
 video_res_dropdown = ttk.Combobox(root, values=["144", "360", "480", "720", "1080"], font=("Helvetica", 12))
 video_res_dropdown.set("1080")
 video_res_dropdown.pack(pady=5)
 
 # Audio Bitrate Dropdown
-audio_bitrate_label = tk.Label(root, text="Select Audio Bitrate (kbps):", font=("Helvetica", 12), fg="#FFFFFF", bg="#0A0A0A")
+audio_bitrate_label = tk.Label(root, text="Select Audio Bitrate (kbps):", font=("Helvetica", 12), fg="#FFFFFF", bg="#1A1A1A")
 audio_bitrate_label.pack(pady=5)
 audio_bitrate_dropdown = ttk.Combobox(root, values=["64", "128", "192", "256", "320"], font=("Helvetica", 12))
 audio_bitrate_dropdown.set("128")
 audio_bitrate_dropdown.pack(pady=5)
+
+# Subtitles Toggle Button
+subtitles_button = tk.Button(root, text="Toggle Subtitles", font=("Helvetica", 12), command=toggle_subtitles, bg="#9b59b6", fg="#FFFFFF")
+subtitles_button.pack(pady=10)
 
 # Buttons
 output_folder_button = tk.Button(root, text="Select Output Folder", font=("Helvetica", 12), command=select_output_folder, bg="#00FF00", fg="#000000")
@@ -194,7 +222,7 @@ video_button.pack(pady=10)
 audio_button = tk.Button(root, text="Download Audio", font=("Helvetica", 12), command=lambda: download_audio(url_entry.get()), bg="#3498DB", fg="#FFFFFF")
 audio_button.pack(pady=10)
 
-exit_button = tk.Button(root, text="Exit", font=("Helvetica", 12), command=root.quit, bg="#FF0000", fg="#FFFFFF")
+exit_button = tk.Button(root, text="Exit", font=("Helvetica", 12), command=on_exit, bg="#FF0000", fg="#FFFFFF")
 exit_button.pack(pady=10)
 
 # Dependency Check
