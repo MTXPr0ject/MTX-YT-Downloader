@@ -7,6 +7,8 @@ import json
 import speech_recognition as sr
 import pyttsx3
 from datetime import datetime
+import logging
+import sys
 
 # Initialize TTS engine
 tts_engine = pyttsx3.init()
@@ -19,6 +21,27 @@ logging.basicConfig(filename="download_log.txt", level=logging.DEBUG,
 # Global constants
 MEMORY_FILE = "user_preferences.json"
 DOWNLOAD_HISTORY_FILE = "download_history.json"
+
+# Dynamic paths for executables
+BASE_DIR = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__)
+YTDLP_PATH = os.path.join(BASE_DIR, "yt-dlp.exe")
+FFMPEG_PATH = os.path.join(BASE_DIR, "ffmpeg.exe")
+
+# Check for executables
+def check_dependencies():
+    missing = []
+    if not os.path.exists(YTDLP_PATH):
+        missing.append("yt-dlp.exe")
+    if not os.path.exists(FFMPEG_PATH):
+        missing.append("ffmpeg.exe")
+
+    if missing:
+        error_msg = f"The following dependencies are missing: {', '.join(missing)}\nPlease ensure they are in the same directory as this program."
+        logging.error(error_msg)
+        messagebox.showerror("Missing Dependencies", error_msg)
+        tts_engine.say(error_msg)
+        tts_engine.runAndWait()
+        sys.exit(1)
 
 # Load or initialize user preferences
 def load_memory():
@@ -95,7 +118,7 @@ def download_video(url):
         speak("Please select an output folder.")
         return
 
-    command = f"yt-dlp -f 'bestvideo[height<={resolution}]+bestaudio/best[height<={resolution}]' --merge-output-format mp4 -o '{output_dir}/%(title)s.%(ext)s' {url}"
+    command = f'"{YTDLP_PATH}" -f "bestvideo[height<={resolution}]+bestaudio/best[height<={resolution}]" --merge-output-format mp4 -o "{output_dir}/%(title)s.%(ext)s" {url}'
     run_command(command)
     add_to_history(url)
 
@@ -119,7 +142,7 @@ def download_audio(url):
         speak("Please select an output folder.")
         return
 
-    command = f"yt-dlp -x --audio-format mp3 --audio-quality {bitrate} --embed-metadata --embed-thumbnail -o '{output_dir}/%(title)s.%(ext)s' {url}"
+    command = f'"{YTDLP_PATH}" -x --audio-format mp3 --audio-quality {bitrate} --embed-metadata --embed-thumbnail -o "{output_dir}/%(title)s.%(ext)s" {url}'
     run_command(command)
     add_to_history(url)
 
@@ -173,5 +196,8 @@ audio_button.pack(pady=10)
 
 exit_button = tk.Button(root, text="Exit", font=("Helvetica", 12), command=root.quit, bg="#FF0000", fg="#FFFFFF")
 exit_button.pack(pady=10)
+
+# Dependency Check
+check_dependencies()
 
 root.mainloop()
